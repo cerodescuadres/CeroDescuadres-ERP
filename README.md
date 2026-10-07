@@ -1,11 +1,11 @@
-# CeroDescuadres-ERP
+# CeroDescuadres - Flujo de Caja
 
-Python starter project for CeroDescuadres-ERP.
+Aplicación web sencilla para registrar ingresos y gastos, con almacenamiento temporal local en `datos.csv`.
 
-## Run
+## Previsualización web
 
 ```bash
-python main.py
+python -m streamlit run main.py --server.port 3000 --server.address 0.0.0.0
 ```
 
-This starter has no third-party dependencies. ERP features have not been chosen yet.
+También puedes iniciar la previsualización con el botón **Ejecutar** del proyecto. Los registros se guardan en `datos.csv` al pulsar **Guardar Registro**.

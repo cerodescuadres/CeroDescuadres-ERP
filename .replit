@@ -24,12 +24,13 @@ args = "CeroDescuadres-ERP"
 name = "CeroDescuadres-ERP"
 author = "agent"
 
+[workflows.workflow.metadata]
+outputType = "webview"
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "python main.py"
-
-[workflows.workflow.metadata]
-outputType = "console"
+args = "python -m streamlit run main.py --server.port 3000 --server.address 0.0.0.0 --server.headless true"
+waitForPort = 3000
 
 [agent]
 stack = "PNPM_WORKSPACE"
@@ -38,3 +39,7 @@ expertMode = true
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
+
+[nix]
+channel = "stable-25_05"
+packages = ["glibcLocales"]
