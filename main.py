@@ -45,6 +45,26 @@ def guardar_registro(registro: dict[str, object]) -> None:
     )
 
 
+def calcular_metricas(registros: pd.DataFrame) -> tuple[float, float, float]:
+    """Return actual cash, pending receivables, and pending payables."""
+    if registros.empty:
+        return 0.0, 0.0, 0.0
+
+    importes = pd.to_numeric(registros["Importe"], errors="raise")
+    ingresos = registros["Tipo"].eq("Ingreso")
+    gastos = registros["Tipo"].eq("Gasto")
+    cobrados_pagados = registros["Estado"].eq("Cobrado/Pagado")
+    pendientes = registros["Estado"].eq("Pendiente")
+
+    caja_real = (
+        importes[ingresos & cobrados_pagados].sum()
+        - importes[gastos & cobrados_pagados].sum()
+    )
+    por_cobrar = importes[ingresos & pendientes].sum()
+    por_pagar = importes[gastos & pendientes].sum()
+    return float(caja_real), float(por_cobrar), float(por_pagar)
+
+
 def main() -> None:
     st.set_page_config(page_title="CeroDescuadres - Flujo de Caja")
     st.title("CeroDescuadres - Flujo de Caja")
@@ -80,10 +100,28 @@ def main() -> None:
             st.success("Registro guardado en datos.csv.")
 
     registros = cargar_registros()
+    caja_real, por_cobrar, por_pagar = calcular_metricas(registros)
+    columna_caja, columna_cobrar, columna_pagar = st.columns(3)
+    columna_caja.metric("Caja Real", caja_real)
+    columna_cobrar.metric("Por Cobrar (Pendiente)", por_cobrar)
+    columna_pagar.metric("Por Pagar (Deuda)", por_pagar)
+
     if registros.empty:
         st.info("Todavía no hay registros. Añade una operación desde la barra lateral.")
     else:
-        st.dataframe(registros, use_container_width=True, hide_index=True)
+        registros_recientes = registros.assign(
+            _fecha_orden=pd.to_datetime(registros["Fecha"], errors="raise")
+        )
+        registros_recientes = (
+            registros_recientes.sort_values(
+                "_fecha_orden",
+                ascending=False,
+                kind="stable",
+            )
+            .drop(columns="_fecha_orden")
+            .reset_index(drop=True)
+        )
+        st.dataframe(registros_recientes, use_container_width=True, hide_index=True)
 
 
 if __name__ == "__main__":
