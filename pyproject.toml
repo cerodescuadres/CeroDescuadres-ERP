@@ -1,9 +1,10 @@
 [project]
 name = "cerodescuadres-erp"
 version = "0.1.0"
-description = "Aplicación sencilla de flujo de caja con Streamlit y Pandas"
+description = "Aplicación sencilla de flujo de caja"
 requires-python = ">=3.12"
 dependencies = [
-    "pandas>=3.0.6",
-    "streamlit>=1.65.0",
+    "pandas",
+    "streamlit",
+    "requests"
 ]

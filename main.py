@@ -1,128 +1,156 @@
-"""Streamlit app for tracking cash flow records."""
-
-from pathlib import Path
-
-import pandas as pd
 import streamlit as st
+import pandas as pd
+import requests
+from datetime import date
 
+st.set_page_config(page_title="CeroDescuadres Comercial", layout="wide")
 
-CSV_PATH = Path(__file__).with_name("datos.csv")
-COLUMNAS = [
-    "Fecha",
-    "Cliente/Proveedor",
-    "Concepto",
-    "Tipo",
-    "Estado",
-    "Importe",
-]
+# 1. Configuración de API Directa (Sin usar la librería conflictiva de Supabase)
+URL = st.secrets["SUPABASE_URL"]
+KEY = st.secrets["SUPABASE_KEY"]
 
+def get_headers(token=None):
+    h = {"apikey": KEY, "Content-Type": "application/json"}
+    if token:
+        h["Authorization"] = f"Bearer {token}"
+    return h
 
-def cargar_registros() -> pd.DataFrame:
-    """Load saved records, or return an empty table for a new project."""
-    if not CSV_PATH.exists() or CSV_PATH.stat().st_size == 0:
-        return pd.DataFrame(columns=COLUMNAS)
+# 2. Pantalla de Seguridad (Login / Registro)
+if 'user_token' not in st.session_state:
+    st.session_state.user_token = None
+    st.session_state.user_email = None
+    st.session_state.user_id = None
 
-    registros = pd.read_csv(CSV_PATH)
-    columnas_faltantes = [columna for columna in COLUMNAS if columna not in registros.columns]
-    if columnas_faltantes:
-        raise ValueError(
-            "El archivo datos.csv no contiene las columnas esperadas: "
-            + ", ".join(columnas_faltantes)
-        )
+if st.session_state.user_token is None:
+    st.title("🔒 CeroDescuadres - Acceso Clientes")
 
-    return registros.loc[:, COLUMNAS]
+    # Creamos las pestañas (la primera es la que sale por defecto)
+    tab_login, tab_registro = st.tabs(["🔑 Iniciar Sesión", "📝 Crear nueva cuenta"])
 
-
-def guardar_registro(registro: dict[str, object]) -> None:
-    """Append one record to the local CSV file."""
-    nuevo_registro = pd.DataFrame([registro], columns=COLUMNAS)
-    nuevo_registro.to_csv(
-        CSV_PATH,
-        mode="a",
-        header=not CSV_PATH.exists() or CSV_PATH.stat().st_size == 0,
-        index=False,
-        encoding="utf-8",
-    )
-
-
-def calcular_metricas(registros: pd.DataFrame) -> tuple[float, float, float]:
-    """Return actual cash, pending receivables, and pending payables."""
-    if registros.empty:
-        return 0.0, 0.0, 0.0
-
-    importes = pd.to_numeric(registros["Importe"], errors="raise")
-    ingresos = registros["Tipo"].eq("Ingreso")
-    gastos = registros["Tipo"].eq("Gasto")
-    cobrados_pagados = registros["Estado"].eq("Cobrado/Pagado")
-    pendientes = registros["Estado"].eq("Pendiente")
-
-    caja_real = (
-        importes[ingresos & cobrados_pagados].sum()
-        - importes[gastos & cobrados_pagados].sum()
-    )
-    por_cobrar = importes[ingresos & pendientes].sum()
-    por_pagar = importes[gastos & pendientes].sum()
-    return float(caja_real), float(por_cobrar), float(por_pagar)
-
-
-def main() -> None:
-    st.set_page_config(page_title="CeroDescuadres - Flujo de Caja")
-    st.title("CeroDescuadres - Flujo de Caja")
-
-    with st.sidebar:
-        st.header("Registrar operación")
-        with st.form("formulario_registro"):
-            fecha = st.date_input("Fecha")
-            cliente_proveedor = st.text_input("Cliente/Proveedor")
-            concepto = st.text_input("Concepto")
-            tipo = st.selectbox("Tipo", ["Ingreso", "Gasto"])
-            estado = st.selectbox("Estado", ["Pendiente", "Cobrado/Pagado"])
-            importe = st.number_input(
-                "Importe",
-                min_value=0.0,
-                value=0.0,
-                step=0.01,
-                format="%.2f",
+    with tab_login:
+        st.subheader("Acceso a tu cuenta")
+        email_login = st.text_input("Correo electrónico", key="log_email")
+        pass_login = st.text_input("Contraseña", type="password", key="log_pass")
+        if st.button("Entrar"):
+            res = requests.post(
+                f"{URL}/auth/v1/token?grant_type=password",
+                json={"email": email_login, "password": pass_login},
+                headers=get_headers()
             )
-            guardar = st.form_submit_button("Guardar Registro")
+            if res.status_code == 200:
+                data = res.json()
+                st.session_state.user_token = data['access_token']
+                st.session_state.user_id = data['user']['id']
+                st.session_state.user_email = data['user']['email']
+                st.rerun()
+            else:
+                st.error("Credenciales incorrectas.")
 
-        if guardar:
-            guardar_registro(
-                {
-                    "Fecha": fecha.isoformat(),
-                    "Cliente/Proveedor": cliente_proveedor,
-                    "Concepto": concepto,
-                    "Tipo": tipo,
-                    "Estado": estado,
-                    "Importe": importe,
-                }
+    with tab_registro:
+        st.subheader("Nuevo Cliente")
+        email_reg = st.text_input("Correo electrónico", key="reg_email")
+        pass_reg = st.text_input("Contraseña", type="password", key="reg_pass")
+        if st.button("Crear Cuenta"):
+            res = requests.post(
+                f"{URL}/auth/v1/signup",
+                json={"email": email_reg, "password": pass_reg},
+                headers=get_headers()
             )
-            st.success("Registro guardado en datos.csv.")
+            if res.status_code == 200:
+                st.success("Cuenta creada con éxito. Ve a la pestaña 'Iniciar Sesión' para entrar.")
+            else:
+                st.error(f"Error del servidor: {res.text}")
+    st.stop() # Bloquea el resto de la app si no hay sesión
 
-    registros = cargar_registros()
-    caja_real, por_cobrar, por_pagar = calcular_metricas(registros)
-    columna_caja, columna_cobrar, columna_pagar = st.columns(3)
-    columna_caja.metric("Caja Real", caja_real)
-    columna_cobrar.metric("Por Cobrar (Pendiente)", por_cobrar)
-    columna_pagar.metric("Por Pagar (Deuda)", por_pagar)
+# --- A PARTIR DE AQUÍ: EL USUARIO ESTÁ DENTRO DE SU CUENTA ---
 
-    if registros.empty:
-        st.info("Todavía no hay registros. Añade una operación desde la barra lateral.")
+st.sidebar.success(f"👤 {st.session_state.user_email}")
+if st.sidebar.button("Cerrar Sesión"):
+    st.session_state.user_token = None
+    st.rerun()
+
+st.title("CeroDescuadres - Panel de Control PRO")
+
+# 3. Cargar datos desde la nube
+def cargar_datos():
+    res = requests.get(
+        f"{URL}/rest/v1/movimientos?select=*",
+        headers=get_headers(st.session_state.user_token)
+    )
+    if res.status_code == 200 and len(res.json()) > 0:
+        return pd.DataFrame(res.json())
     else:
-        registros_recientes = registros.assign(
-            _fecha_orden=pd.to_datetime(registros["Fecha"], errors="raise")
-        )
-        registros_recientes = (
-            registros_recientes.sort_values(
-                "_fecha_orden",
-                ascending=False,
-                kind="stable",
-            )
-            .drop(columns="_fecha_orden")
-            .reset_index(drop=True)
-        )
-        st.dataframe(registros_recientes, use_container_width=True, hide_index=True)
+        return pd.DataFrame(columns=["id", "fecha", "cliente_proveedor", "concepto", "tipo", "categoria", "estado", "importe", "fecha_vencimiento"])
 
+df = cargar_datos()
 
-if __name__ == "__main__":
-    main()
+# Dashboard Métricas
+if not df.empty:
+    df['importe'] = pd.to_numeric(df['importe'], errors='coerce').fillna(0)
+    ingresos = df[(df['tipo'] == 'Ingreso') & (df['estado'] == 'Cobrado/Pagado')]['importe'].sum()
+    gastos = df[(df['tipo'] == 'Gasto') & (df['estado'] == 'Cobrado/Pagado')]['importe'].sum()
+    aperturas = df[(df['tipo'] == 'Apertura') & (df['estado'] == 'Cobrado/Pagado')]['importe'].sum()
+    cierres = df[(df['tipo'] == 'Cierre') & (df['estado'] == 'Cobrado/Pagado')]['importe'].sum()
+
+    caja_real = (ingresos + aperturas) - (gastos + cierres)
+    por_cobrar = df[(df['tipo'] == 'Ingreso') & (df['estado'] == 'Pendiente')]['importe'].sum()
+    por_pagar = df[(df['tipo'] == 'Gasto') & (df['estado'] == 'Pendiente')]['importe'].sum()
+else:
+    caja_real = por_cobrar = por_pagar = 0
+
+col1, col2, col3 = st.columns(3)
+col1.metric("💰 Caja Real", f"{caja_real:,.2f} €")
+col2.metric("🟢 Por Cobrar", f"{por_cobrar:,.2f} €")
+col3.metric("🔴 Por Pagar", f"{por_pagar:,.2f} €")
+st.divider()
+
+# Barra Lateral: Nuevo Registro
+st.sidebar.header("Nueva Operación")
+fecha = st.sidebar.date_input("Fecha", date.today())
+cliente_final = st.sidebar.text_input("Cliente / Proveedor")
+concepto = st.sidebar.text_input("Concepto")
+tipo = st.sidebar.selectbox("Tipo", ["Ingreso", "Gasto", "Apertura", "Cierre"])
+categoria = st.sidebar.selectbox("Categoría", ["Ventas", "Suministros", "Nóminas", "Impuestos", "Servicios", "Otros"])
+estado = st.sidebar.selectbox("Estado", ["Pendiente", "Cobrado/Pagado"])
+importe = st.sidebar.number_input("Importe (€)", min_value=0.0, format="%.2f", step=1.0)
+vencimiento_final = ""
+if st.sidebar.checkbox("📅 Fecha límite"):
+    vencimiento_final = st.sidebar.date_input("Vencimiento", date.today())
+
+if st.sidebar.button("Registrar en la Nube ✅"):
+    if cliente_final.strip() != "":
+        nuevo_registro = {
+            "user_id": st.session_state.user_id,
+            "fecha": str(fecha),
+            "cliente_proveedor": cliente_final.strip(),
+            "concepto": concepto,
+            "tipo": tipo,
+            "categoria": categoria,
+            "estado": estado,
+            "importe": importe,
+            "fecha_vencimiento": str(vencimiento_final)
+        }
+
+        headers_post = get_headers(st.session_state.user_token)
+        headers_post["Prefer"] = "return=minimal"
+
+        requests.post(
+            f"{URL}/rest/v1/movimientos",
+            json=nuevo_registro,
+            headers=headers_post
+        )
+        st.rerun()
+
+# Exportar
+if not df.empty:
+    st.sidebar.divider()
+    csv = df.drop(columns=['id', 'user_id'], errors='ignore').to_csv(index=False, sep=';', decimal=',').encode('utf-8-sig')
+    st.sidebar.download_button("📥 Descargar CSV", data=csv, file_name="Cuentas.csv", mime="text/csv")
+
+# Historial
+st.subheader("Libro Mayor")
+if not df.empty:
+    df_mostrar = df.drop(columns=['id', 'user_id'], errors='ignore').iloc[::-1].reset_index(drop=True)
+    st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
+else:
+    st.info("No hay datos en tu cuenta. Haz tu primer registro.")
